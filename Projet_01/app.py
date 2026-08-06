@@ -126,16 +126,24 @@ with tab_dash:
     df_passengers = execute_query(db_conn, "SELECT COUNT(*) as total FROM passengers")
     df_flights = execute_query(db_conn, "SELECT COUNT(*) as total FROM flights")
     
-    total_rev = df_bookings[df_bookings['status'] == 'confirmed']['price_eur'].sum()
-    confirmed_count = len(df_bookings[df_bookings['status'] == 'confirmed'])
+    # Sécurisation si les requêtes retournent des DataFrames vides
+    if df_bookings is None or df_bookings.empty:
+        df_bookings = pd.DataFrame(columns=['id', 'status', 'seat_class', 'flight_number', 'destination', 'price_eur'])
+
+    passengers_count = df_passengers['total'].iloc[0] if (df_passengers is not None and not df_passengers.empty and 'total' in df_passengers.columns) else 0
+    flights_count = df_flights['total'].iloc[0] if (df_flights is not None and not df_flights.empty and 'total' in df_flights.columns) else 0
+
+    confirmed_bookings = df_bookings[df_bookings['status'] == 'confirmed']
+    total_rev = confirmed_bookings['price_eur'].sum() if not confirmed_bookings.empty else 0.0
+    confirmed_count = len(confirmed_bookings)
     total_bookings = len(df_bookings)
-    conversion_rate = (confirmed_count / total_bookings * 100) if total_bookings > 0 else 0
+    conversion_rate = (confirmed_count / total_bookings * 100) if total_bookings > 0 else 0.0
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Chiffre d'Affaires Confirmé", f"{total_rev:,.2f} €", delta="+12.4%")
     m2.metric("Réservations Totales", f"{total_bookings}", delta=f"{conversion_rate:.1f}% confirmées")
-    m3.metric("Passagers Enregistrés", f"{df_passengers['total'].iloc[0]}")
-    m4.metric("Vols au Catalogue", f"{df_flights['total'].iloc[0]}")
+    m3.metric("Passagers Enregistrés", f"{passengers_count}")
+    m4.metric("Vols au Catalogue", f"{flights_count}")
 
     st.markdown("---")
 
@@ -143,32 +151,39 @@ with tab_dash:
 
     with col_g1:
         st.subheader("📈 Chiffre d'Affaires par Destination (€)")
-        rev_by_dest = df_bookings[df_bookings['status'] == 'confirmed'].groupby('destination')['price_eur'].sum().reset_index()
-        fig_dest = px.bar(
-            rev_by_dest, 
-            x='destination', 
-            y='price_eur',
-            color='price_eur',
-            color_continuous_scale='Blues',
-            labels={'price_eur': 'Revenu (€)', 'destination': 'Destination'},
-            text_auto='.2s'
-        )
-        fig_dest.update_layout(template="plotly_white", showlegend=False, margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig_dest, use_container_width=True)
+        if not confirmed_bookings.empty:
+            rev_by_dest = confirmed_bookings.groupby('destination')['price_eur'].sum().reset_index()
+            fig_dest = px.bar(
+                rev_by_dest, 
+                x='destination', 
+                y='price_eur',
+                color='price_eur',
+                color_continuous_scale='Blues',
+                labels={'price_eur': 'Revenu (€)', 'destination': 'Destination'},
+                text_auto='.2s'
+            )
+            fig_dest.update_layout(template="plotly_white", showlegend=False, margin=dict(l=20, r=20, t=30, b=20))
+            st.plotly_chart(fig_dest, use_container_width=True)
+        else:
+            st.info("Aucune réservation confirmée disponible pour le graphique.")
 
     with col_g2:
         st.subheader("📊 Répartition du Statut des Réservations")
-        status_counts = df_bookings['status'].value_counts().reset_index()
-        fig_status = px.pie(
-            status_counts, 
-            names='status', 
-            values='count',
-            color='status',
-            color_discrete_map={'confirmed': '#10B981', 'cancelled': '#EF4444', 'pending': '#F59E0B'},
-            hole=0.4
-        )
-        fig_status.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig_status, use_container_width=True)
+        if not df_bookings.empty:
+            status_counts = df_bookings['status'].value_counts().reset_index()
+            status_counts.columns = ['status', 'count']
+            fig_status = px.pie(
+                status_counts, 
+                names='status', 
+                values='count',
+                color='status',
+                color_discrete_map={'confirmed': '#10B981', 'cancelled': '#EF4444', 'pending': '#F59E0B'},
+                hole=0.4
+            )
+            fig_status.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=30, b=20))
+            st.plotly_chart(fig_status, use_container_width=True)
+        else:
+            st.info("Aucune réservation disponible pour le graphique.")
 
     st.subheader("📋 Aperçu Récent des Réservations")
     st.dataframe(df_bookings.head(8), use_container_width=True, hide_index=True)
@@ -186,7 +201,7 @@ with tab_agent:
         if st.button("Exécuter la requête SQL"):
             try:
                 res_df = execute_query(db_conn, manual_sql)
-                if res_df.empty:
+                if res_df is None or res_df.empty:
                     st.warning("La requête s'est exécutée mais n'a retourné aucun résultat.")
                 else:
                     st.success(f"Résultat ({len(res_df)} ligne(s)) :")
